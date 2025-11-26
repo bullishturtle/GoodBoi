@@ -1,7 +1,26 @@
 {
-  "engine": "cloud",
+  "engine": "local",
   "model_path": "models/qwen2.5-7b-instruct-q5_k_m-00001-of-00002.gguf",
+  "small_model_path": "models/goodboy_small.gguf",
   "cloud_api_base": "http://127.0.0.1:8000",
+  "cloud_model": "meta-llama-3-8b-instruct",
   "max_tokens": 512,
-  "temperature": 0.6
+  "temperature": 0.6,
+  "memory_backend": "chromadb",
+  "safety_mode": "interactive",
+  "admin_user": "lando",
+  "allowed_tools": [
+    "read_file",
+    "write_file",
+    "run_subprocess",
+    "open_url",
+    "send_email",
+    "open_path",
+    "organize_downloads",
+    "tail_logs"
+  ],
+  "api_keys": {
+    "openai": "",
+    "anthropic": ""
+  }
 }

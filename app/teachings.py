@@ -1,126 +1,80 @@
-"""Teachings Store - Persistent knowledge base that learns from interactions."""
+"""Teaching store for user-provided lessons and corrections.
+
+This module lets the owner explicitly "teach" GoodBoy.AI by writing structured
+lessons to disk. Lessons are also suitable for ingestion into the memory
+backend or offline fine-tuning pipelines later.
+"""
+from __future__ import annotations
+
 import json
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, asdict, field
+from typing import Any, Dict, List, Optional
+
+from .config import ROOT
+from .logging_utils import get_logger
+
+log = get_logger(__name__)
+
+DATA_DIR = ROOT / "data"
+LESSONS_PATH = DATA_DIR / "teachings.jsonl"
 
 
 @dataclass
-class Lesson:
-    """A single teaching/lesson stored in memory."""
-    id: str
+class Teaching:
+    """A single owner-provided lesson.
+
+    Fields are intentionally generic so they can cover corrections, new
+    preferences, or domain-specific knowledge.
+    """
+
     topic: str
     instruction: str
     tags: List[str]
     created_at: str
-    usage_count: int = 0
-    effectiveness_score: float = 0.5
-    source: str = "user"  # user, reflection, correction
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
-class TeachingsStore:
-    """Persistent store for lessons and corrections that improve over time."""
-    
-    def __init__(self, memory_dir: Path):
-        self.memory_dir = memory_dir
-        self.file_path = memory_dir / "teachings.jsonl"
-        self.lessons: List[Lesson] = []
-        self._load()
-    
-    def _load(self):
-        """Load lessons from disk."""
-        if not self.file_path.exists():
-            return
-        
-        with open(self.file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        data = json.loads(line)
-                        self.lessons.append(Lesson(**data))
-                    except Exception:
-                        pass
-    
-    def _save(self):
-        """Persist all lessons to disk."""
-        with open(self.file_path, "w", encoding="utf-8") as f:
-            for lesson in self.lessons:
-                f.write(json.dumps(asdict(lesson)) + "\n")
-    
-    def add_lesson(
-        self,
-        topic: str,
-        instruction: str,
-        tags: Optional[List[str]] = None,
-        source: str = "user"
-    ) -> Lesson:
-        """Add a new lesson to the store."""
-        lesson = Lesson(
-            id=f"lesson_{len(self.lessons)}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+class TeachingStore:
+    def __init__(self) -> None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.path = LESSONS_PATH
+
+    def add_lesson(self, topic: str, instruction: str, tags: Optional[List[str]] = None) -> Teaching:
+        lesson = Teaching(
             topic=topic,
             instruction=instruction,
             tags=tags or [],
-            created_at=datetime.now().isoformat(),
-            source=source
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
-        self.lessons.append(lesson)
-        self._save()
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(lesson.to_dict(), ensure_ascii=False) + "\n")
+        log.info("Teaching added", extra={"topic": topic, "tags": tags or []})
         return lesson
-    
-    def get_relevant_lessons(self, query: str, k: int = 5) -> List[Lesson]:
-        """Find lessons relevant to query."""
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        
-        scored = []
-        for lesson in self.lessons:
-            score = 0
-            # Topic match
-            if query_lower in lesson.topic.lower():
-                score += 3
-            # Tag match
-            for tag in lesson.tags:
-                if tag.lower() in query_words:
-                    score += 2
-            # Instruction keyword match
-            instruction_words = set(lesson.instruction.lower().split())
-            overlap = len(query_words & instruction_words)
-            score += overlap
-            # Boost by effectiveness
-            score *= (0.5 + lesson.effectiveness_score)
-            
-            if score > 0:
-                scored.append((score, lesson))
-        
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [lesson for _, lesson in scored[:k]]
-    
-    def mark_lesson_used(self, lesson_id: str, was_helpful: bool = True):
-        """Track lesson usage and effectiveness."""
-        for lesson in self.lessons:
-            if lesson.id == lesson_id:
-                lesson.usage_count += 1
-                # Adjust effectiveness based on feedback
-                delta = 0.1 if was_helpful else -0.1
-                lesson.effectiveness_score = max(0, min(1, lesson.effectiveness_score + delta))
-                self._save()
-                break
-    
-    def get_all_by_topic(self, topic: str) -> List[Lesson]:
-        """Get all lessons for a topic."""
-        return [l for l in self.lessons if l.topic.lower() == topic.lower()]
+
+    def load_all(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        out: List[Dict[str, Any]] = []
+        with self.path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+        if limit is not None:
+            return out[-limit:]
+        return out
 
 
-# Global singleton
-_store: Optional[TeachingsStore] = None
+_store: Optional[TeachingStore] = None
 
 
-def get_store(memory_dir: Optional[Path] = None) -> TeachingsStore:
-    """Get or create the teachings store singleton."""
+def get_store() -> TeachingStore:
     global _store
     if _store is None:
-        path = memory_dir or Path("memory")
-        path.mkdir(exist_ok=True)
-        _store = TeachingsStore(path)
+        _store = TeachingStore()
     return _store

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "list_project_root",
+      "kind": "subprocess",
+      "command_template": "dir",
+      "destructive": false,
+      "description": "List files in the GoodBoy.AI project root directory."
+    },
+    {
+      "name": "compress_video",
+      "kind": "subprocess",
+      "command_template": "ffmpeg -y -i \"{input}\" -vcodec libx264 -crf 28 \"{output}\"",
+      "destructive": false,
+      "description": "Compress a video file using ffmpeg (local, no upload)."
+    },
+    {
+      "name": "tail_goodboy_logs",
+      "kind": "subprocess",
+      "command_template": "python scripts\\process_action_queue.py",
+      "destructive": false,
+      "description": "Run the action queue processor to act on Bathy's suggested actions."
+    }
+  ]
+}

@@ -1,338 +1,289 @@
-"""GoodBoy.AI FastAPI Backend - The Bathy City Server with Unified Brain."""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import os
-from datetime import datetime
-from pathlib import Path
+from pydantic import BaseModel
 
-from app.council import CouncilRouter
-from app.memory import MemoryManager
-from app.models import ChatRequest, ChatResponse, TeachingRequest
-from app.memory_evolution import EvolutionSystem
-from app.learning_engine import LearningEngine
-from app.mini_bot_nursery import MiniBotNursery
-from app.teachings import get_store
-from app.brain import get_brain, UnifiedBrain
-
-# Initialize directories
-DATA_DIR = Path("data")
-MODELS_DIR = Path("models")
-MEMORY_DIR = Path("memory")
-for d in [DATA_DIR, MODELS_DIR, MEMORY_DIR]:
-    d.mkdir(exist_ok=True)
-
-# Global instances
-council = None
-memory_manager = None
-evolution_system = None
-learning_engine = None
-minibot_nursery = None
-brain: UnifiedBrain = None
+from .config import load_config
+from .agents.president import BathyPresident
+from .agents.clerk import Clerk
+from .agents.janitor import Janitor
+from .tools import TOOL_REGISTRY
+from .memory_backend import MemoryBackend
+from .automation import AutomationEngine
+from .user_profile import get_store as get_user_profile_store
+from .teachings import get_store as get_teaching_store
+from .brain import get_brain_blueprint
+from .action_queue import enqueue_actions
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize on startup, cleanup on shutdown."""
-    global council, memory_manager, evolution_system, learning_engine, minibot_nursery, brain
-    
-    print("[GoodBoy.AI] Initializing Bathy City systems...")
-    
-    brain = get_brain()
-    print(f"[GoodBoy.AI] Brain online - {brain.get_introspection()}")
-    
-    council = CouncilRouter()
-    memory_manager = MemoryManager(MEMORY_DIR)
-    evolution_system = EvolutionSystem(MEMORY_DIR)
-    learning_engine = LearningEngine(MEMORY_DIR)
-    minibot_nursery = MiniBotNursery(MEMORY_DIR)
-    
-    print("[GoodBoy.AI] Council online with agents:", [a.name for a in council.agents])
-    print("[GoodBoy.AI] Memory, Evolution, and Learning systems active")
-    print("[GoodBoy.AI] Bathy City is ready to serve!")
-    
-    yield
-    
-    print("[GoodBoy.AI] Shutting down Bathy City...")
+class ChatRequest(BaseModel):
+    message: str
+    agent_selector: Optional[str] = None
+    max_tokens: Optional[int] = None
+    mode: Optional[str] = None
 
 
-app = FastAPI(
-    title="GoodBoy.AI",
-    description="Self-aware, self-learning AI assistant with unified brain architecture",
-    version="1.0.0",
-    lifespan=lifespan
-)
+class ToolExecRequest(BaseModel):
+    name: str
+    args: Dict[str, Any]
+    consent_token: Optional[str] = None
 
-# CORS for desktop UI and dashboard
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+class ToolExecResponse(BaseModel):
+    ok: bool
+    detail: str
+    result: Dict[str, Any]
+
+
+class AgentTraceItem(BaseModel):
+    agent: str
+    role: str
+    proposal: str
+
+
+class SuggestedAction(BaseModel):
+    kind: str  # e.g. "tool" | "note" | "automation_idea"
+    description: str
+    tool_name: Optional[str] = None
+    tool_args: Dict[str, Any] = {}
+
+
+class ChatResponse(BaseModel):
+    output: str
+    used_model: str
+    agent_trace: List[AgentTraceItem]
+    suggested_actions: List[SuggestedAction] = []
+
+
+class TeachRequest(BaseModel):
+    topic: str
+    instruction: str
+    tags: Optional[List[str]] = None
+
+
+class TeachResponse(BaseModel):
+    topic: str
+    instruction: str
+    tags: List[str]
+    created_at: str
+
+
+class AutomationTaskPayload(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    kind: str = "interval"  # "once" or "interval"
+    next_run_at: Optional[str] = None
+    interval_seconds: Optional[int] = None
+    steps: List[Dict[str, Any]]
+
+
+app = FastAPI(title="GoodBoy.AI Bathy Core", version="0.1.0")
+
+bathy = BathyPresident()
+clerk = Clerk()
+janitor = Janitor()
+memory_backend = MemoryBackend()automation_engine = AutomationEngine()
+_user_profile_store = get_user_profile_store()
+_teaching_store = get_teaching_store()
 
 
 @app.get("/")
-async def root():
-    """Health check and system status."""
+async def root() -> Dict[str, Any]:
+    cfg = load_config()
     return {
         "status": "ok",
-        "app": "GoodBoy.AI",
-        "version": "1.0.0",
-        "agents": [a.name for a in council.agents] if council else [],
-        "brain_status": brain.get_status() if brain else None,
-        "timestamp": datetime.now().isoformat()
+        "engine": cfg.get("engine", "local"),
+        "model_path": cfg.get("model_path"),
+        "safety_mode": cfg.get("safety_mode", "interactive"),
+        "agents": bathy.list_agents(),
+        "allowed_tools": cfg.get("allowed_tools", []),
     }
-
-
-@app.get("/health")
-async def health():
-    """Simple health check endpoint."""
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/status")
-async def status():
-    """Detailed system status."""
-    return {
-        "status": "online",
-        "version": "1.0.0",
-        "agents_count": len(council.agents) if council else 0,
-        "memory_entries": len(memory_manager.messages) if memory_manager else 0,
-        "brain": brain.get_status() if brain else None,
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@app.get("/brain/introspect")
-async def brain_introspect():
-    """Get brain's self-reflection and current state."""
-    if not brain:
-        raise HTTPException(status_code=503, detail="Brain not initialized")
-    
-    return {
-        "introspection": brain.get_introspection(),
-        "status": brain.get_status(),
-        "thought_trace": brain.get_thought_trace()
-    }
-
-
-@app.get("/brain/thoughts")
-async def get_thoughts():
-    """Get recent chain-of-thought history."""
-    if not brain:
-        raise HTTPException(status_code=503, detail="Brain not initialized")
-    
-    return {
-        "current_state": brain.self_awareness.current_state.value,
-        "recent_thoughts": [
-            {
-                "query": cot.query[:100],
-                "confidence": cot.confidence,
-                "agents": cot.agents_consulted,
-                "emotional_tone": cot.emotional_tone.value,
-                "reasoning_time_ms": cot.reasoning_time_ms,
-                "thought_count": len(cot.thoughts)
-            }
-            for cot in brain.thought_history[-10:]
-        ]
-    }
-
-
-@app.get("/evolution")
-async def evolution():
-    """Get evolution status for UI."""
-    if evolution_system:
-        return evolution_system.get_status()
-    return {"generation": 0, "total_interactions": 0}
 
 
 @app.get("/agents")
-async def list_agents():
-    """List all available agents in the council."""
-    return {
-        "agents": [
-            {
-                "name": a.name,
-                "role": a.role,
-                "description": a.description,
-                "status": a.get_status()
-            }
-            for a in council.agents
-        ]
-    }
+async def list_agents() -> Dict[str, Any]:
+    """List advisor agents Bathy can call on."""
+    return {"agents": bathy.list_agents()}
 
 
-@app.post("/chat")
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Main chat endpoint - routes through unified brain."""
-    if not request.message or not request.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
-    
-    # Store user message
-    memory_manager.add_message(user_message=request.message)
-    
-    try:
-        response_text, chain_of_thought = await brain.think(
-            query=request.message,
-            context=memory_manager.get_context(),
-            council=council,
-            memory_manager=memory_manager,
-            evolution_system=evolution_system,
-            learning_engine=learning_engine
-        )
-    except Exception as e:
-        # Fallback to direct council if brain fails
-        result = await council.process(
-            message=request.message,
-            mode=request.mode or "auto",
-            context=memory_manager.get_context()
-        )
-        response_text = result["output"]
-        chain_of_thought = None
-    
-    # Store response
-    memory_manager.add_message(assistant_message=response_text)
-    
-    # Check if mini-bot should be spawned for repeated patterns
-    if learning_engine and learning_engine.suggest_routing_optimization():
-        opt = learning_engine.suggest_routing_optimization()
-        if opt and opt.get("frequency", 0) > 5:
-            keywords = request.message.lower().split()[:3]
-            minibot_nursery.spawn_minibot(
-                specialization=f"Pattern: {keywords}",
-                parent_agent=opt["suggested_agents"][0] if opt["suggested_agents"] else "Jarvis",
-                trigger_pattern=" ".join(keywords)
-            )
-    
-    return ChatResponse(
-        output=response_text,
-        agent_trace=[
-            {"agent": t.source, "proposal": t.content, "confidence": t.confidence}
-            for t in (chain_of_thought.thoughts if chain_of_thought else [])
-        ],
-        route_metadata={
-            "mode": "brain",
-            "agents": chain_of_thought.agents_consulted if chain_of_thought else [],
-            "confidence": chain_of_thought.confidence if chain_of_thought else 0.5,
-            "emotional_tone": chain_of_thought.emotional_tone.value if chain_of_thought else "neutral",
-            "reasoning_time_ms": chain_of_thought.reasoning_time_ms if chain_of_thought else 0
-        },
-        suggested_actions=[]
-    )
+@app.get("/brain/blueprint")
+async def brain_blueprint() -> Dict[str, Any]:
+    """Return an introspectable chain-of-command map for GoodBoy.AI City."""
+    return get_brain_blueprint()
 
 
 @app.get("/memory/search")
-async def search_memory(q: str, k: int = 5):
-    """Search memory with keyword matching."""
-    results = memory_manager.search(query=q, k=k)
+async def memory_search(q: str, k: int = 5) -> Dict[str, Any]:
+    """Search GoodBoy.AI long-term memory for relevant context."""
+    results = memory_backend.search(q, k=k)
     return {"query": q, "results": results}
 
 
-@app.get("/memory/context")
-async def get_context(k: int = 10):
-    """Get recent conversation context."""
-    return memory_manager.get_context(k=k)
+@app.post("/teach", response_model=TeachResponse)
+async def teach(req: TeachRequest) -> TeachResponse:
+    """Explicitly teach Bathy a lesson.
 
+    Lessons are stored in data/teachings.jsonl and also offered to the
+    MemoryBackend for retrieval.
+    """
 
-@app.post("/teachings/add")
-async def add_teaching(request: TeachingRequest):
-    """Add a new teaching/lesson to GoodBoy's knowledge."""
-    store = get_store()
-    lesson = store.add_lesson(
-        topic=request.topic,
-        instruction=request.instruction,
-        tags=request.tags or [],
-        source="user"
-    )
-    return {"status": "added", "lesson_id": lesson.id}
-
-
-@app.get("/teachings/search")
-async def search_teachings(q: str, k: int = 5):
-    """Search teachings by query."""
-    store = get_store()
-    lessons = store.get_relevant_lessons(q, k=k)
-    return {
-        "query": q,
-        "lessons": [
+    lesson = _teaching_store.add_lesson(req.topic, req.instruction, req.tags)
+    # Offer lesson into vector memory as well.
+    memory_backend.ingest_items(
+        [
             {
-                "id": l.id,
-                "topic": l.topic,
-                "instruction": l.instruction,
-                "tags": l.tags,
-                "effectiveness": l.effectiveness_score
+                "id": f"teaching-{hash((lesson.topic, lesson.created_at))}",
+                "text": f"Teaching topic: {lesson.topic}\nInstruction: {lesson.instruction}",
+                "meta": {"source": "teaching", "tags": lesson.tags},
             }
-            for l in lessons
         ]
-    }
+    )
+    return TeachResponse(
+        topic=lesson.topic,
+        instruction=lesson.instruction,
+        tags=lesson.tags,
+        created_at=lesson.created_at,
+    )
 
 
 @app.post("/janitor/run")
-async def run_janitor():
-    """Run health checks and cleanup."""
-    report = {
-        "timestamp": datetime.now().isoformat(),
-        "memory_entries": len(memory_manager.messages),
-        "agents_healthy": len([a for a in council.agents if a.is_healthy()]),
-        "evolution_status": evolution_system.get_status(),
-        "brain_status": brain.get_status() if brain else None,
-        "minibots_active": len(minibot_nursery.get_active_minibots()),
-        "actions": []
-    }
-    
-    # Memory cleanup (keep last 30 days)
-    old_count = len(memory_manager.messages)
-    memory_manager.cleanup_old_entries(days=30)
-    cleaned = old_count - len(memory_manager.messages)
-    if cleaned > 0:
-        report["actions"].append(f"Cleaned {cleaned} old memory entries")
-    
-    # Brain rest (restore energy)
-    if brain:
-        brain.self_awareness.rest()
-        report["actions"].append("Brain rested - energy restored")
-    
-    # Generate evolution suggestions
-    suggestions = evolution_system.suggest_actions()
-    report["overseer_suggestions"] = suggestions
-    
-    return report
+async def janitor_run() -> Dict[str, Any]:
+    rep = janitor.run_checks()
+    return {"ok": rep.ok, "summary": rep.summary, "details": rep.details}
 
 
-@app.get("/evolution/status")
-async def get_evolution_status():
-    """Get detailed evolution status."""
-    return evolution_system.get_status()
+@app.get("/janitor/status")
+async def janitor_status() -> Dict[str, Any]:
+    return janitor.last_status()
 
 
-@app.post("/evolution/generate")
-async def trigger_generation():
-    """Manually trigger new evolutionary generation."""
-    gen_info = evolution_system.trigger_generation_increment()
-    return {
-        "message": "New generation triggered",
-        "generation_info": gen_info
-    }
+# --- Automation endpoints ----------------------------------------------------
 
 
-@app.get("/minibots/list")
-async def list_minibots():
-    """List all active mini-bots."""
-    bots = minibot_nursery.get_active_minibots()
-    return {
-        "minibots": bots,
-        "count": len(bots)
-    }
+@app.get("/automation/tasks")
+async def list_automation_tasks() -> Dict[str, Any]:
+    return {"tasks": automation_engine.list_tasks()}
 
 
-@app.post("/minibots/spawn")
-async def spawn_minibot(specialization: str, parent_agent: str, trigger_pattern: str):
-    """Manually spawn a new mini-bot."""
-    minibot = minibot_nursery.spawn_minibot(
-        specialization=specialization,
-        parent_agent=parent_agent,
-        trigger_pattern=trigger_pattern
+@app.post("/automation/tasks")
+async def upsert_automation_task(payload: AutomationTaskPayload) -> Dict[str, Any]:
+    task = automation_engine.upsert_task(payload.dict())
+    return {"task": task.to_dict()}
+
+
+@app.delete("/automation/tasks/{task_id}")
+async def delete_automation_task(task_id: str) -> Dict[str, Any]:
+    removed = automation_engine.delete_task(task_id)
+    return {"removed": removed}
+
+
+@app.post("/automation/run-due")
+async def automation_run_due() -> Dict[str, Any]:
+    rep = automation_engine.run_due_tasks()
+    return rep
+
+
+@app.post("/tools/exec", response_model=ToolExecResponse)
+async def tools_exec(req: ToolExecRequest) -> ToolExecResponse:
+    cfg = load_config()
+    if req.name not in cfg.get("allowed_tools", []):
+        raise HTTPException(status_code=403, detail=f"Tool '{req.name}' is not allowed.")
+
+    result = clerk.execute(req.name, req.args, consent_token=req.consent_token)
+    # Self-learning hook: record tool outcome in user profile.
+    _user_profile_store.record_tool(req.name, result.ok, result.detail)
+    return ToolExecResponse(ok=result.ok, detail=result.detail, result=result.tool_result.data)
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest) -> ChatResponse:
+    try:
+        result = bathy.handle(req.message, agent_selector=req.agent_selector, max_tokens=req.max_tokens)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"Model inference error: {e}")
+
+    trace_items = [AgentTraceItem(agent=p.agent, role=p.role, proposal=p.proposal) for p in result.trace]
+    # All advisors share the same underlying model for now (Qwen/TinyLlama via GPT4All)
+    from .models_backend import ModelBackend  # local import to avoid circulars at import time
+
+    backend = ModelBackend.instance()
+    used_model_path = str(backend.model_path)
+
+    # Optional: ask the model for structured suggested actions.
+    suggested_actions: List[SuggestedAction] = []
+    try:
+        tools_list = ", ".join(load_config().get("allowed_tools", []))
+        planner_prompt = (
+            "You are Bathy, planning potential follow-up actions for the owner's request. "
+            "You have access to tools with these names: "
+            f"{tools_list}. Given the user's request and your reply, propose at most 3 "
+            "actions as JSON. Use a list of objects with keys 'kind', 'description', "
+            "'tool_name', and 'tool_args'. 'kind' can be 'tool', 'note', or 'automation_idea'. "
+            "If no actions are appropriate, return an empty JSON list.\n\n"
+            f"User request: {req.message}\n"
+            f"Bathy reply: {result.output}\n"
+        )
+        raw_plan = backend.generate(planner_prompt, max_tokens=256, temperature=0.2)
+        import json as _json
+
+        parsed = _json.loads(raw_plan.strip()) if raw_plan.strip().startswith("[") else []
+        for item in parsed:
+            try:
+                suggested_actions.append(
+                    SuggestedAction(
+                        kind=str(item.get("kind", "note")),
+                        description=str(item.get("description", "")),
+                        tool_name=item.get("tool_name"),
+                        tool_args=item.get("tool_args") or {},
+                    )
+                )
+            except Exception:
+                continue
+    except Exception:
+        suggested_actions = []
+
+    # Self-learning hook: record chat for the owner profile, and optionally
+    # feed into long-term memory if configured.
+    _user_profile_store.record_chat(req.message, result.output)
+    cfg = load_config()
+    if cfg.get("memory_auto_ingest_from_api", True):
+        memory_backend.ingest_items(
+            [
+                {
+                    "id": f"api-chat-{hash((req.message, result.output))}",
+                    "text": f"User: {req.message}\nAssistant: {result.output}",
+                    "meta": {"source": "api_chat", "agent_selector": req.agent_selector or "council"},
+                }
+            ]
+        )
+
+    # Enqueue suggested actions for later processing by autonomous scripts.
+    try:
+        enqueue_actions(
+            [
+                {
+                    "kind": sa.kind,
+                    "description": sa.description,
+                    "tool_name": sa.tool_name,
+                    "tool_args": sa.tool_args,
+                }
+                for sa in suggested_actions
+            ],
+            source_message=req.message,
+            source_reply=result.output,
+        )
+    except Exception:
+        # Queueing should never break the main chat path.
+        pass
+
+    return ChatResponse(
+        output=result.output,
+        used_model=used_model_path,
+        agent_trace=trace_items,
+        suggested_actions=suggested_actions,
     )
-    return {"message": "Mini-bot spawned", "minibot": minibot}
