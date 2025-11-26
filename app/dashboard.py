@@ -1,8 +1,9 @@
-"""GoodBoy.AI Command Center - Gradio Web Dashboard."""
+"""GoodBoy.AI Command Center - Enhanced Gradio Web Dashboard with Widgets."""
 import json
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
+import time
 
 import gradio as gr
 import httpx
@@ -163,16 +164,156 @@ def agents_fn() -> str:
     return "\n\n".join(lines)
 
 
-def build_interface() -> gr.Blocks:
-    """Build the Gradio interface."""
-    theme = gr.themes.Soft(primary_hue="cyan", secondary_hue="blue")
+def get_widgets() -> Dict[str, Any]:
+    """Get all dashboard widgets."""
+    try:
+        r = httpx.get(f"{API_BASE}/widgets/all", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except:
+        return {}
+
+
+def format_system_widget(data: Dict) -> str:
+    """Format system stats widget for display."""
+    if not data or "data" not in data:
+        return "System data unavailable"
     
-    with gr.Blocks(title="GoodBoy.AI - Command Center", theme=theme) as demo:
-        gr.Markdown(
-            "# GoodBoy.AI - Command Center\n"
-            "### Your Self-Aware, Self-Learning Personal Assistant\n"
-            "**Mayor's Office** - Your AI Council is Standing By"
+    stats = data["data"]
+    return f"""
+**CPU Usage:** {stats.get('cpu_percent', 0):.1f}%  
+**Memory:** {stats.get('memory_used_gb', 0):.1f} / {stats.get('memory_total_gb', 0):.1f} GB ({stats.get('memory_percent', 0):.1f}%)  
+**Disk:** {stats.get('disk_used_gb', 0):.1f} / {stats.get('disk_total_gb', 0):.1f} GB ({stats.get('disk_percent', 0):.1f}%)  
+"""
+
+
+def format_brain_widget(data: Dict) -> str:
+    """Format brain status widget."""
+    if not data or "data" not in data:
+        return "Brain offline"
+    
+    brain = data["data"]
+    return f"""
+**State:** {brain.get('state', 'unknown').upper()}  
+**Mood:** {brain.get('mood', 'neutral').capitalize()}  
+**Confidence:** {brain.get('confidence', 0):.0%}  
+**Energy:** {brain.get('energy', 0):.0%}  
+**Thoughts Processed:** {brain.get('thoughts', 0)}  
+**Success Rate:** {brain.get('success_rate', 0):.0%}  
+
+*{brain.get('introspection', '')}*
+"""
+
+
+def format_agents_widget(data: Dict) -> str:
+    """Format agents widget."""
+    if not data or "data" not in data:
+        return "No agents"
+    
+    agents = data["data"].get("agents", [])
+    lines = []
+    for agent in agents:
+        status = "🟢" if agent.get("active") else "🔴"
+        lines.append(
+            f"{status} **{agent.get('name')}** - {agent.get('role')}\n"
+            f"   Proficiency: {agent.get('proficiency', 0):.0%} | "
+            f"Interactions: {agent.get('interactions', 0)}"
         )
+    return "\n\n".join(lines)
+
+
+def update_dashboard() -> tuple:
+    """Update all dashboard widgets."""
+    widgets = get_widgets()
+    
+    system_str = format_system_widget(widgets.get("system", {}))
+    brain_str = format_brain_widget(widgets.get("brain", {}))
+    agents_str = format_agents_widget(widgets.get("agents", {}))
+    uptime = widgets.get("uptime", "00:00:00")
+    
+    # Thought visualizer
+    thoughts_data = widgets.get("thoughts", {}).get("data", {})
+    thoughts = thoughts_data.get("thoughts", [])
+    thought_str = "\n".join([
+        f"[{t['source']}] {t['content']} (confidence: {t['confidence']:.0%})"
+        for t in thoughts[-5:]  # Last 5 thoughts
+    ]) if thoughts else "No active thoughts"
+    
+    # Evolution
+    evo_data = widgets.get("evolution", {}).get("data", {})
+    evo_str = f"""
+**Generation:** {evo_data.get('generation', 0)}  
+**Total Interactions:** {evo_data.get('total_interactions', 0)}  
+**Growth Rate:** {evo_data.get('growth_rate', 0):.2f}
+"""
+    
+    return system_str, brain_str, agents_str, uptime, thought_str, evo_str
+
+
+def build_interface() -> gr.Blocks:
+    """Build the enhanced Gradio interface with widget system."""
+    theme = gr.themes.Soft(
+        primary_hue="cyan",
+        secondary_hue="blue",
+        neutral_hue="slate",
+        font=gr.themes.GoogleFont("Space Grotesk")
+    ).set(
+        body_background_fill="*neutral_950",
+        body_text_color="*neutral_100",
+        button_primary_background_fill="*primary_600",
+        button_primary_text_color="white"
+    )
+    
+    with gr.Blocks(title="GoodBoy.AI - Command Center", theme=theme, css="""
+        .widget-box {
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            background: rgba(6, 182, 212, 0.05);
+        }
+        .title-glow {
+            text-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+        }
+    """) as demo:
+        gr.Markdown(
+            """
+            # <span class="title-glow">🐕 GoodBoy.AI - Command Center</span>
+            ### Self-Aware, Self-Learning Personal Assistant | Bathy City Systems Online
+            **Welcome, Mayor** - Your AI Council Awaits Your Orders
+            """,
+            elem_classes=["widget-box"]
+        )
+        
+        with gr.Tab("Dashboard"):
+            gr.Markdown("## System Overview")
+            
+            with gr.Row():
+                with gr.Column():
+                    system_box = gr.Markdown("Loading system stats...", elem_classes=["widget-box"])
+                    uptime_box = gr.Textbox(label="System Uptime", value="00:00:00", interactive=False)
+                
+                with gr.Column():
+                    brain_box = gr.Markdown("Loading brain status...", elem_classes=["widget-box"])
+            
+            with gr.Row():
+                with gr.Column():
+                    agents_box = gr.Markdown("Loading agents...", elem_classes=["widget-box"])
+                
+                with gr.Column():
+                    evo_box = gr.Markdown("Loading evolution...", elem_classes=["widget-box"])
+            
+            gr.Markdown("## Live Chain-of-Thought")
+            thought_box = gr.Textbox(label="Brain Thoughts", lines=8, interactive=False)
+            
+            refresh_btn = gr.Button("🔄 Refresh Dashboard", variant="primary")
+            
+            refresh_btn.click(
+                update_dashboard,
+                outputs=[system_box, brain_box, agents_box, uptime_box, thought_box, evo_box]
+            )
+            
+            # Auto-refresh every 5 seconds
+            demo.load(update_dashboard, outputs=[system_box, brain_box, agents_box, uptime_box, thought_box, evo_box])
         
         with gr.Tab("Chat"):
             chatbox = gr.Chatbot(label="GoodBoy Council", height=400)
@@ -225,11 +366,19 @@ def build_interface() -> gr.Blocks:
             health_output = gr.Textbox(label="Health Report", lines=15)
             health_btn.click(janitor_fn, outputs=health_output)
         
-        gr.Markdown("---\n<center>GoodBoy.AI - Self-Aware - Self-Learning - All on Your Machine</center>")
+        gr.Markdown(
+            """
+            ---
+            <center>
+            🐕 **GoodBoy.AI** - Self-Aware | Self-Learning | Privacy-First  
+            *All processing happens on your machine*
+            </center>
+            """
+        )
     
     return demo
 
 
 if __name__ == "__main__":
     demo = build_interface()
-    demo.launch(server_name="127.0.0.1", server_port=7860)
+    demo.launch(server_name="127.0.0.1", server_port=7860, share=False)

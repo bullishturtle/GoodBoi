@@ -14,6 +14,7 @@ from app.learning_engine import LearningEngine
 from app.mini_bot_nursery import MiniBotNursery
 from app.teachings import get_store
 from app.brain import get_brain, UnifiedBrain
+from app.widgets import WidgetManager, SystemStats
 
 # Initialize directories
 DATA_DIR = Path("data")
@@ -29,12 +30,13 @@ evolution_system = None
 learning_engine = None
 minibot_nursery = None
 brain: UnifiedBrain = None
+widget_manager = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize on startup, cleanup on shutdown."""
-    global council, memory_manager, evolution_system, learning_engine, minibot_nursery, brain
+    global council, memory_manager, evolution_system, learning_engine, minibot_nursery, brain, widget_manager
     
     print("[GoodBoy.AI] Initializing Bathy City systems...")
     
@@ -46,9 +48,11 @@ async def lifespan(app: FastAPI):
     evolution_system = EvolutionSystem(MEMORY_DIR)
     learning_engine = LearningEngine(MEMORY_DIR)
     minibot_nursery = MiniBotNursery(MEMORY_DIR)
+    widget_manager = WidgetManager()
     
     print("[GoodBoy.AI] Council online with agents:", [a.name for a in council.agents])
     print("[GoodBoy.AI] Memory, Evolution, and Learning systems active")
+    print("[GoodBoy.AI] Widget dashboard ready")
     print("[GoodBoy.AI] Bathy City is ready to serve!")
     
     yield
@@ -336,3 +340,55 @@ async def spawn_minibot(specialization: str, parent_agent: str, trigger_pattern:
         trigger_pattern=trigger_pattern
     )
     return {"message": "Mini-bot spawned", "minibot": minibot}
+
+
+@app.get("/widgets/system")
+async def get_system_widget():
+    """Get system monitoring widget data."""
+    return widget_manager.get_system_widget()
+
+
+@app.get("/widgets/brain")
+async def get_brain_widget():
+    """Get brain status widget."""
+    return widget_manager.get_brain_widget(brain)
+
+
+@app.get("/widgets/agents")
+async def get_agents_widget():
+    """Get council agents widget."""
+    return widget_manager.get_agent_widget(council.agents if council else [])
+
+
+@app.get("/widgets/evolution")
+async def get_evolution_widget():
+    """Get evolution tracker widget."""
+    return widget_manager.get_evolution_widget(evolution_system)
+
+
+@app.get("/widgets/thoughts")
+async def get_thoughts_widget():
+    """Get chain-of-thought visualizer widget."""
+    return widget_manager.get_thought_widget(brain)
+
+
+@app.get("/widgets/all")
+async def get_all_widgets():
+    """Get all widgets at once for dashboard."""
+    return {
+        "system": widget_manager.get_system_widget(),
+        "brain": widget_manager.get_brain_widget(brain),
+        "agents": widget_manager.get_agents_widget(council.agents if council else []),
+        "evolution": widget_manager.get_evolution_widget(evolution_system),
+        "thoughts": widget_manager.get_thought_widget(brain),
+        "uptime": widget_manager.get_uptime()
+    }
+
+
+@app.get("/widgets/uptime")
+async def get_uptime():
+    """Get system uptime."""
+    return {
+        "uptime": widget_manager.get_uptime(),
+        "timestamp": datetime.now().isoformat()
+    }
