@@ -2,7 +2,7 @@
 import psutil
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 
 @dataclass
@@ -59,7 +59,10 @@ class WidgetManager:
             "evolution_tracker": {"active": True, "refresh_rate": 60},
             "minibot_nursery": {"active": True, "refresh_rate": 30},
             "thought_visualizer": {"active": True, "refresh_rate": 2},
-            "conversation": {"active": True, "refresh_rate": 0}
+            "conversation": {"active": True, "refresh_rate": 0},
+            "consciousness": {"active": True, "refresh_rate": 2},
+            "predictions": {"active": True, "refresh_rate": 5},
+            "stream": {"active": True, "refresh_rate": 1}
         }
         self.start_time = time.time()
     
@@ -89,7 +92,10 @@ class WidgetManager:
                 "mood": status.get("mood", "neutral"),
                 "confidence": status.get("confidence", 0),
                 "energy": status.get("energy", 0),
-                "thoughts": status.get("thoughts_processed", 0),
+                "cognitive_load": status.get("cognitive_load", 0),
+                "prediction_accuracy": status.get("prediction_accuracy", 0),
+                "patterns_learned": status.get("patterns_learned", 0),
+                "thoughts": status.get("total_thoughts", 0),
                 "success_rate": status.get("success_rate", 0),
                 "introspection": introspection
             },
@@ -148,16 +154,110 @@ class WidgetManager:
                     {
                         "content": t.content[:200],
                         "source": t.source,
-                        "confidence": t.confidence
+                        "confidence": t.confidence,
+                        "layer": getattr(t, 'layer', 'cognitive')
                     }
-                    for t in chain.thoughts[-10:]  # Last 10 thoughts
+                    for t in chain.thoughts[-10:]
                 ],
                 "active": True,
                 "confidence": chain.confidence,
-                "emotional_tone": chain.emotional_tone.value if chain.emotional_tone else "neutral"
+                "emotional_tone": chain.emotional_tone.value if chain.emotional_tone else "neutral",
+                "consciousness_level": getattr(chain, 'consciousness_level', 'conscious'),
+                "predictions_made": getattr(chain, 'predictions_made', []),
+                "patterns_matched": getattr(chain, 'patterns_matched', [])
             },
             "timestamp": datetime.now().isoformat()
         }
+    
+    def get_consciousness_widget(self, brain) -> Dict[str, Any]:
+        """Get consciousness status widget - shows three-layer state."""
+        if not brain or not hasattr(brain, 'consciousness') or not brain.consciousness:
+            return {
+                "name": "Consciousness",
+                "type": "consciousness_layers",
+                "data": {"available": False}
+            }
+        
+        consciousness = brain.consciousness
+        report = consciousness.get_self_awareness_report()
+        
+        return {
+            "name": "Consciousness",
+            "type": "consciousness_layers",
+            "data": {
+                "level": report.get("consciousness_level", "conscious"),
+                "attention": report.get("attention_state", "focused"),
+                "identity_continuity": report.get("identity_continuity", 1.0),
+                "self_recognition": report.get("self_recognition", 1.0),
+                "agency_sense": report.get("agency_sense", 0.8),
+                "working_memory_items": report.get("working_memory_items", 0),
+                "learned_patterns": report.get("learned_patterns", 0),
+                "prediction_accuracy": report.get("prediction_accuracy", 0.5),
+                "active_reflexes": report.get("active_reflexes", 0),
+                "layers": {
+                    "cognitive": {"active": True, "label": "Cognitive Integration"},
+                    "prediction": {"active": True, "label": "Pattern Prediction"},
+                    "instinct": {"active": True, "label": "Instinctive Response"}
+                }
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    def get_stream_widget(self, brain) -> Dict[str, Any]:
+        """Get stream of consciousness widget."""
+        if not brain:
+            return {
+                "name": "Stream of Consciousness",
+                "type": "stream",
+                "data": {"stream": []}
+            }
+        
+        stream = brain.get_stream_of_consciousness(15)
+        
+        return {
+            "name": "Stream of Consciousness",
+            "type": "stream",
+            "data": {
+                "stream": stream,
+                "count": len(stream)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    def get_predictions_widget(self, brain) -> Dict[str, Any]:
+        """Get active predictions widget."""
+        if not brain or not hasattr(brain, 'consciousness') or not brain.consciousness:
+            return {
+                "name": "Predictions",
+                "type": "predictions",
+                "data": {"predictions": [], "accuracy": 0}
+            }
+        
+        consciousness = brain.consciousness
+        active_preds = consciousness.prediction.active_predictions if hasattr(consciousness, 'prediction') else []
+        
+        return {
+            "name": "Predictions",
+            "type": "predictions",
+            "data": {
+                "predictions": [
+                    {
+                        "content": p.content,
+                        "confidence": p.confidence,
+                        "basis": p.basis,
+                        "was_correct": p.was_correct
+                    }
+                    for p in active_preds[-5:]
+                ],
+                "accuracy": consciousness.prediction.prediction_accuracy if hasattr(consciousness, 'prediction') else 0,
+                "total": consciousness.prediction.total_predictions if hasattr(consciousness, 'prediction') else 0
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    def get_agents_widget(self, agents: list) -> Dict[str, Any]:
+        """Get council agents widget."""
+        return self.get_agent_widget(agents)
     
     def get_uptime(self) -> str:
         """Get system uptime."""

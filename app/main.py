@@ -392,3 +392,101 @@ async def get_uptime():
         "uptime": widget_manager.get_uptime(),
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.get("/brain/consciousness")
+async def get_consciousness():
+    """Get consciousness system status."""
+    if not brain or not hasattr(brain, 'consciousness') or not brain.consciousness:
+        return {"available": False, "message": "Consciousness engine not initialized"}
+    
+    return {
+        "available": True,
+        "report": brain.consciousness.get_self_awareness_report(),
+        "introspection": brain.consciousness.introspect(),
+        "stream": brain.consciousness.get_stream(10)
+    }
+
+
+@app.get("/brain/stream")
+async def get_stream_of_consciousness():
+    """Get real-time stream of consciousness."""
+    if not brain:
+        raise HTTPException(status_code=503, detail="Brain not initialized")
+    
+    return {
+        "stream": brain.get_stream_of_consciousness(20),
+        "state": brain.self_awareness.current_state.value,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/brain/predictions")
+async def get_predictions():
+    """Get active predictions from the prediction layer."""
+    if not brain or not hasattr(brain, 'consciousness') or not brain.consciousness:
+        return {"predictions": [], "accuracy": 0}
+    
+    consciousness = brain.consciousness
+    return {
+        "predictions": [
+            {
+                "content": p.content,
+                "confidence": p.confidence,
+                "basis": p.basis,
+                "was_correct": p.was_correct
+            }
+            for p in consciousness.prediction.active_predictions[-10:]
+        ] if hasattr(consciousness, 'prediction') else [],
+        "accuracy": consciousness.prediction.prediction_accuracy if hasattr(consciousness, 'prediction') else 0,
+        "total_predictions": consciousness.prediction.total_predictions if hasattr(consciousness, 'prediction') else 0
+    }
+
+
+@app.get("/brain/patterns")
+async def get_learned_patterns():
+    """Get learned patterns from pattern-integrated memory."""
+    if not brain or not hasattr(brain, 'consciousness') or not brain.consciousness:
+        return {"patterns": [], "count": 0}
+    
+    consciousness = brain.consciousness
+    patterns = list(consciousness.pim.patterns.values())[:20] if hasattr(consciousness, 'pim') else []
+    
+    return {
+        "patterns": patterns,
+        "count": len(consciousness.pim.patterns) if hasattr(consciousness, 'pim') else 0
+    }
+
+
+@app.get("/widgets/consciousness")
+async def get_consciousness_widget():
+    """Get consciousness status widget."""
+    return widget_manager.get_consciousness_widget(brain)
+
+
+@app.get("/widgets/stream")
+async def get_stream_widget():
+    """Get stream of consciousness widget."""
+    return widget_manager.get_stream_widget(brain)
+
+
+@app.get("/widgets/predictions")
+async def get_predictions_widget():
+    """Get predictions widget."""
+    return widget_manager.get_predictions_widget(brain)
+
+
+@app.get("/widgets/all")
+async def get_all_widgets():
+    """Get all widgets at once for dashboard."""
+    return {
+        "system": widget_manager.get_system_widget(),
+        "brain": widget_manager.get_brain_widget(brain),
+        "consciousness": widget_manager.get_consciousness_widget(brain),
+        "agents": widget_manager.get_agents_widget(council.agents if council else []),
+        "evolution": widget_manager.get_evolution_widget(evolution_system),
+        "thoughts": widget_manager.get_thought_widget(brain),
+        "stream": widget_manager.get_stream_widget(brain),
+        "predictions": widget_manager.get_predictions_widget(brain),
+        "uptime": widget_manager.get_uptime()
+    }
