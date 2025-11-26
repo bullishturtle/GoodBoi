@@ -1,0 +1,7 @@
+{
+  "engine": "cloud",
+  "model_path": "models/qwen2.5-7b-instruct-q5_k_m-00001-of-00002.gguf",
+  "cloud_api_base": "http://127.0.0.1:8000",
+  "max_tokens": 512,
+  "temperature": 0.6
+}
